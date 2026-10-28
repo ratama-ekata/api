@@ -8,7 +8,7 @@ import logging
 import os
 from typing import List, Optional
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, status, Request, Depends, UploadFile, HTTPException
+from fastapi import FastAPI, status, Request, Depends, UploadFile, HTTPException, Form, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -19,7 +19,7 @@ import app.models  # Ensures all ORM models are registered with Base.metadata
 from app.services.user_service import UserService
 from app.services.suspect_report_service import SuspectReportService
 from app.controllers import api_router
-from app.controllers.suspect_report_controller import submit_suspect_report_json
+from app.controllers.suspect_report_controller import submit_suspect_report, submit_suspect_report_json
 from app.schemas.suspect_report import SuspectReportCreate, SuspectReportResponse
 
 # Configure application logging
@@ -224,62 +224,55 @@ def redirect_api_docs():
     response_model=SuspectReportResponse,
 )
 async def submit_reports_alias(
-    request: Request,
+    fullname: str = Form(..., min_length=2, max_length=255, description="Citizen full name"),
+    email: Optional[str] = Form(None, description="Contact email address"),
+    mobile: str = Form(..., min_length=6, max_length=30, description="Contact mobile phone number"),
+    nic: Optional[str] = Form(None, description="National Identity Card number"),
+    address: Optional[str] = Form(None, description="Citizen / incident address"),
+    police_station: str = Form(..., min_length=2, max_length=150, description="Designated police station"),
+    type_of_activity: str = Form(..., min_length=2, max_length=150, description="Type/category of suspicious activity"),
+    activity_description: str = Form(..., min_length=5, description="Detailed description of the event"),
+    files: Optional[List[UploadFile]] = File(
+        None,
+        description="Multiple evidence files (images, zip files, documents) uploaded directly to AWS S3",
+    ),
     db: Session = Depends(get_db),
 ):
-    """Direct alias endpoint supporting both multipart/form-data (with file uploads) and JSON."""
-    content_type = (request.headers.get("content-type") or "").lower()
+    """Direct alias endpoint allowing frontend report submissions with files."""
+    return await submit_suspect_report(
+        fullname=fullname,
+        email=email,
+        mobile=mobile,
+        nic=nic,
+        address=address,
+        police_station=police_station,
+        type_of_activity=type_of_activity,
+        activity_description=activity_description,
+        files=files,
+        db=db,
+    )
 
-    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
-        form = await request.form()
 
-        fullname = str(form.get("fullname") or form.get("fullName") or "").strip()
-        mobile = str(form.get("mobile") or form.get("phone") or "").strip()
-        police_station = str(form.get("police_station") or form.get("policeStation") or "").strip()
-        type_of_activity = str(form.get("type_of_activity") or form.get("activityType") or "Other").strip()
-        activity_description = str(form.get("activity_description") or form.get("description") or "").strip()
-        email = str(form.get("email") or "not_provided@ratamaekata.gov.lk").strip()
-        nic = str(form.get("nic") or "NOT_PROVIDED").strip()
-        address = str(form.get("address") or "Not provided").strip()
-
-        # Extract files: can be list under "files", "files[]", "attachments"
-        files: List[UploadFile] = []
-        for key in ("files", "files[]", "attachments"):
-            file_items = form.getlist(key)
-            for item in file_items:
-                if isinstance(item, UploadFile) and item.filename:
-                    files.append(item)
-
-        # Also collect any UploadFile value not yet included
-        for val in form.values():
-            if isinstance(val, UploadFile) and val.filename and val not in files:
-                files.append(val)
-
-        report = await SuspectReportService.create_report(
-            db=db,
-            fullname=fullname,
-            email=email,
-            mobile=mobile,
-            nic=nic,
-            address=address,
-            police_station=police_station,
-            type_of_activity=type_of_activity,
-            activity_description=activity_description,
-            files=files if files else None,
-        )
-    else:
-        # JSON payload
-        try:
-            body = await request.json()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid JSON or multipart request body")
-        report_in = SuspectReportCreate(**body)
-        return await submit_suspect_report_json(report_in=report_in, db=db)
-
-    report_dict = SuspectReportResponse.model_validate(report).model_dump()
-    report_dict["report_id"] = report.report_id
-    report_dict["referenceNumber"] = report.report_id or f"RE-{report.created_at.year if report.created_at else 2026}-{str(report.id)[:5].upper()}"
-    return report_dict
+@app.post(
+    "/reports/json",
+    tags=["Reports"],
+    include_in_schema=False,
+    status_code=status.HTTP_201_CREATED,
+    response_model=SuspectReportResponse,
+)
+@app.post(
+    "/api/reports/json",
+    tags=["Reports"],
+    include_in_schema=False,
+    status_code=status.HTTP_201_CREATED,
+    response_model=SuspectReportResponse,
+)
+async def submit_reports_json_alias(
+    report_in: SuspectReportCreate,
+    db: Session = Depends(get_db),
+):
+    """Direct alias endpoint allowing JSON report submissions without attachments."""
+    return await submit_suspect_report_json(report_in=report_in, db=db)
 
 
 if __name__ == "__main__":
