@@ -28,17 +28,22 @@ router = APIRouter(prefix="/suspect-reports", tags=["Suspect Reports"])
     summary="Submit suspect incident report (Public - No Auth Required)",
     description=(
         "Public endpoint allowing citizens to report suspicious activity. "
-        "All citizen identification and incident fields are strictly compulsory. "
         "Supports multiple optional evidence files (images, zip files, documents) which are "
         "streamed directly to AWS S3 and their public links saved in PostgreSQL."
     ),
 )
+@router.post(
+    "",
+    include_in_schema=False,
+    response_model=SuspectReportResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def submit_suspect_report(
     fullname: str = Form(..., min_length=2, max_length=255, description="Citizen full name"),
-    email: str = Form(..., min_length=5, max_length=255, description="Contact email address"),
-    mobile: str = Form(..., min_length=9, max_length=30, description="Contact mobile phone number"),
-    nic: str = Form(..., min_length=9, max_length=30, description="National Identity Card number"),
-    address: str = Form(..., min_length=3, description="Citizen / incident address"),
+    email: Optional[str] = Form(None, description="Contact email address"),
+    mobile: str = Form(..., min_length=6, max_length=30, description="Contact mobile phone number"),
+    nic: Optional[str] = Form(None, description="National Identity Card number"),
+    address: Optional[str] = Form(None, description="Citizen / incident address"),
     police_station: str = Form(..., min_length=2, max_length=150, description="Designated police station"),
     type_of_activity: str = Form(..., min_length=2, max_length=150, description="Type/category of suspicious activity"),
     activity_description: str = Form(..., min_length=5, description="Detailed description of the event"),
@@ -51,17 +56,20 @@ async def submit_suspect_report(
     """
     Public report submission handler:
     - No authentication required.
-    - All fields (fullname, email, mobile, nic, address, police_station, type_of_activity, activity_description) are compulsory.
     - Uploads attached evidence files directly to AWS S3 if provided.
     - Saves S3 links and metadata in PostgreSQL database.
     """
+    final_email = (email or "not_provided@ratamaekata.gov.lk").strip()
+    final_nic = (nic or "NOT_PROVIDED").strip()
+    final_address = (address or "Not provided").strip()
+
     report = await SuspectReportService.create_report(
         db=db,
         fullname=fullname,
-        email=email,
+        email=final_email,
         mobile=mobile,
-        nic=nic,
-        address=address,
+        nic=final_nic,
+        address=final_address,
         police_station=police_station,
         type_of_activity=type_of_activity,
         activity_description=activity_description,
@@ -157,23 +165,29 @@ def list_suspect_reports(
     summary="Get single suspect report by ID (ADMIN & SYSTEM_ADMIN only)",
     description=(
         "Retrieve complete details of a specific suspect report and all its S3 evidence links. "
+        "Accepts either database UUID or official Report ID (e.g. RE-2026-A9019B). "
         "Restricted strictly to ADMIN and SYSTEM_ADMIN roles."
     ),
 )
+@router.get(
+    "/{report_id}/",
+    response_model=SuspectReportResponse,
+    include_in_schema=False,
+)
 def get_suspect_report_by_id(
-    report_id: uuid.UUID,
+    report_id: str,
     current_user: User = Depends(require_admin_or_system_admin),
     db: Session = Depends(get_db),
 ):
     """
     Protected endpoint:
-    Retrieve single report by ID. Restricted to ADMIN and SYSTEM_ADMIN.
+    Retrieve single report by UUID or report_id. Restricted to ADMIN and SYSTEM_ADMIN.
     """
     report = SuspectReportService.get_by_id(db, report_id)
     if not report:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Suspect report #{report_id} not found",
+            detail=f"Suspect report '{report_id}' not found",
         )
     return report
 

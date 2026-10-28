@@ -11,7 +11,7 @@ import asyncio
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from fastapi import UploadFile, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.suspect_report import SuspectReport, SuspectReportFile
 from app.services.s3_service import upload_file_to_s3, delete_file_from_s3
@@ -111,11 +111,9 @@ class SuspectReportService:
                 detail="Full name is required",
             )
 
+        # Optional fields fallback gracefully if left blank
         if not email or not email.strip():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email address is required",
-            )
+            email = "not_provided@ratamaekata.gov.lk"
 
         if not mobile or not mobile.strip():
             raise HTTPException(
@@ -124,16 +122,10 @@ class SuspectReportService:
             )
 
         if not nic or not nic.strip():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="National Identity Card (NIC) number is required",
-            )
+            nic = "NOT_PROVIDED"
 
         if not address or not address.strip():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Address is required",
-            )
+            address = "Not provided"
 
         if not police_station or not police_station.strip():
             raise HTTPException(
@@ -247,9 +239,30 @@ class SuspectReportService:
         return report
 
     @staticmethod
-    def get_by_id(db: Session, report_id: uuid.UUID) -> Optional[SuspectReport]:
+    def get_by_id(db: Session, report_id: Any) -> Optional[SuspectReport]:
         """Fetch single report with evidence files strictly via SQLAlchemy ORM."""
-        return db.query(SuspectReport).filter(SuspectReport.id == report_id).first()
+        report_str = str(report_id).strip()
+        # 1. Try finding by human-readable report_id (e.g. RE-2026-A9019B)
+        report = (
+            db.query(SuspectReport)
+            .options(joinedload(SuspectReport.files))
+            .filter(SuspectReport.report_id == report_str)
+            .first()
+        )
+        if report:
+            return report
+
+        # 2. Try querying by primary key UUID
+        try:
+            report_uuid = uuid.UUID(report_str)
+            return (
+                db.query(SuspectReport)
+                .options(joinedload(SuspectReport.files))
+                .filter(SuspectReport.id == report_uuid)
+                .first()
+            )
+        except (ValueError, TypeError):
+            return None
 
     @staticmethod
     def list_reports(
@@ -263,7 +276,7 @@ class SuspectReportService:
         List suspect reports with filtering and pagination strictly via SQLAlchemy ORM.
         Restricted to ADMIN and SYSTEM_ADMIN.
         """
-        query = db.query(SuspectReport)
+        query = db.query(SuspectReport).options(joinedload(SuspectReport.files))
 
         if police_station:
             query = query.filter(

@@ -6,8 +6,9 @@ auto-seeds initial administrative users, and registers domain controllers.
 
 import logging
 import os
+from typing import List, Optional
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, status, Request, Depends
+from fastapi import FastAPI, status, Request, Depends, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -16,6 +17,7 @@ from app.core.config import settings
 from app.core.database import engine, Base, SessionLocal, get_db
 import app.models  # Ensures all ORM models are registered with Base.metadata
 from app.services.user_service import UserService
+from app.services.suspect_report_service import SuspectReportService
 from app.controllers import api_router
 from app.controllers.suspect_report_controller import submit_suspect_report_json
 from app.schemas.suspect_report import SuspectReportCreate, SuspectReportResponse
@@ -218,11 +220,62 @@ def redirect_api_docs():
     response_model=SuspectReportResponse,
 )
 async def submit_reports_alias(
-    report_in: SuspectReportCreate,
+    request: Request,
     db: Session = Depends(get_db),
 ):
-    """Direct alias endpoint allowing frontend report submissions."""
-    return await submit_suspect_report_json(report_in=report_in, db=db)
+    """Direct alias endpoint supporting both multipart/form-data (with file uploads) and JSON."""
+    content_type = (request.headers.get("content-type") or "").lower()
+
+    if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+        form = await request.form()
+
+        fullname = str(form.get("fullname") or form.get("fullName") or "").strip()
+        mobile = str(form.get("mobile") or form.get("phone") or "").strip()
+        police_station = str(form.get("police_station") or form.get("policeStation") or "").strip()
+        type_of_activity = str(form.get("type_of_activity") or form.get("activityType") or "Other").strip()
+        activity_description = str(form.get("activity_description") or form.get("description") or "").strip()
+        email = str(form.get("email") or "not_provided@ratamaekata.gov.lk").strip()
+        nic = str(form.get("nic") or "NOT_PROVIDED").strip()
+        address = str(form.get("address") or "Not provided").strip()
+
+        # Extract files: can be list under "files", "files[]", "attachments"
+        files: List[UploadFile] = []
+        for key in ("files", "files[]", "attachments"):
+            file_items = form.getlist(key)
+            for item in file_items:
+                if isinstance(item, UploadFile) and item.filename:
+                    files.append(item)
+
+        # Also collect any UploadFile value not yet included
+        for val in form.values():
+            if isinstance(val, UploadFile) and val.filename and val not in files:
+                files.append(val)
+
+        report = await SuspectReportService.create_report(
+            db=db,
+            fullname=fullname,
+            email=email,
+            mobile=mobile,
+            nic=nic,
+            address=address,
+            police_station=police_station,
+            type_of_activity=type_of_activity,
+            activity_description=activity_description,
+            files=files if files else None,
+        )
+    else:
+        # JSON payload
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON or multipart request body")
+        report_in = SuspectReportCreate(**body)
+        return await submit_suspect_report_json(report_in=report_in, db=db)
+
+    report_dict = SuspectReportResponse.model_validate(report).model_dump()
+    report_dict["report_id"] = report.report_id
+    report_dict["referenceNumber"] = report.report_id or f"RE-{report.created_at.year if report.created_at else 2026}-{str(report.id)[:5].upper()}"
+    return report_dict
 
 
 if __name__ == "__main__":
