@@ -14,3 +14,4 @@ for p in [parent_dir, current_dir]:
 from app.main import app
 
 __all__ = ["app"]
+
