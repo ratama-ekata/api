@@ -88,6 +88,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    redirect_slashes=False,
     lifespan=lifespan,
 )
 
@@ -108,6 +109,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def vercel_path_rewrite_middleware(request: Request, call_next):
+    """
+    Normalizes path in Vercel Serverless environment:
+    Strips internal serverless prefixes like /api/index.py or /api/index
+    so that FastAPI router matches user-intended paths.
+    """
+    path = request.scope.get("path", "")
+    for prefix in ("/api/index.py", "/api/index", "/index.py"):
+        if path.startswith(prefix):
+            new_path = path[len(prefix):]
+            request.scope["path"] = new_path if new_path.startswith("/") else f"/{new_path}"
+            break
+    return await call_next(request)
 
 # Mount all domain controllers via central API router (with and without /api prefix)
 app.include_router(api_router)
