@@ -3,10 +3,13 @@ Database connection, engine instantiation, sessionmaker, and session dependency.
 Strictly relies on SQLAlchemy ORM.
 """
 
+import logging
 from typing import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from app.core.config import settings
+
+logger = logging.getLogger("ratamaekata_api.database")
 
 # Handle postgres:// vs postgresql:// (common in Neon/Supabase connection URIs)
 raw_db_url = settings.DATABASE_URL
@@ -16,12 +19,17 @@ if raw_db_url and raw_db_url.startswith("postgres://"):
 # Set short connection timeout so serverless function cold starts do not hang on unreachable DB
 connect_args = {"connect_timeout": 5} if "postgresql" in raw_db_url else {}
 
-# Create SQLAlchemy engine with pool_pre_ping for connection health verification
-engine = create_engine(
-    raw_db_url,
-    pool_pre_ping=True,
-    connect_args=connect_args,
-)
+try:
+    # Create SQLAlchemy engine with pool_pre_ping for connection health verification
+    engine = create_engine(
+        raw_db_url,
+        pool_pre_ping=True,
+        connect_args=connect_args,
+    )
+except Exception as e:
+    logger.error("Failed to initialize database engine for %s: %s", raw_db_url, e)
+    # Fallback to in-memory SQLite so FastAPI imports and serves health/docs without hard crash
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
 
 # Thread-local sessionmaker
 SessionLocal = sessionmaker(
@@ -44,4 +52,3 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-

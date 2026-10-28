@@ -3,10 +3,19 @@ Central application configuration loaded from environment variables (.env).
 """
 
 import os
+from typing import Optional
 from dotenv import load_dotenv
 
 # Load .env file at project root
 load_dotenv()
+
+
+def _safe_int(val: Optional[str], default: int) -> int:
+    """Safely parse integer from environment variable string."""
+    try:
+        return int(val) if val is not None and str(val).strip() else default
+    except (ValueError, TypeError):
+        return default
 
 
 class Settings:
@@ -29,7 +38,7 @@ class Settings:
         "9a4b8c1d3e5f7a2b6c8d0e1f3a5b7c9d2e4f6a8b0c2d4e6f8a1b3c5d7e9f0a2b",
     )
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = _safe_int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"), 60)
 
     # Initial System Admin Seed Credentials
     SYSADMIN_USERNAME: str = os.getenv("SYSADMIN_USERNAME", "sysadmin")
@@ -53,7 +62,7 @@ class Settings:
 
     # SMTP Email Notification Settings
     SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_PORT: int = _safe_int(os.getenv("SMTP_PORT"), 587)
     SMTP_USER: str = os.getenv("SMTP_USER", "")
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     SMTP_TLS: bool = os.getenv("SMTP_TLS", "True").lower() in ("true", "1", "yes")
