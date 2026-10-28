@@ -117,6 +117,11 @@ async def submit_suspect_report_json(
 
 
 @router.get(
+    "",
+    response_model=List[SuspectReportResponse],
+    include_in_schema=False,
+)
+@router.get(
     "/",
     response_model=List[SuspectReportResponse],
     summary="List all suspect reports (ADMIN & SYSTEM_ADMIN only)",
