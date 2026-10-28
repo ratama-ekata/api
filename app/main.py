@@ -83,7 +83,7 @@ app = FastAPI(
 )
 
 # Cross-Origin Resource Sharing (CORS) Middleware
-# Explicitly whitelist localhost origins with credentials enabled
+# Whitelist localhost, Vercel deployments (*.vercel.app), and production domain
 allowed_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -94,7 +94,7 @@ allowed_origins = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|([a-zA-Z0-9_-]+\.)*vercel\.app|([a-zA-Z0-9_-]+\.)*ratamaekata\.gov\.lk)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
