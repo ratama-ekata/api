@@ -8,12 +8,19 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from app.core.config import settings
 
+# Handle postgres:// vs postgresql:// (common in Neon/Supabase connection URIs)
+raw_db_url = settings.DATABASE_URL
+if raw_db_url and raw_db_url.startswith("postgres://"):
+    raw_db_url = raw_db_url.replace("postgres://", "postgresql://", 1)
+
+# Set short connection timeout so serverless function cold starts do not hang on unreachable DB
+connect_args = {"connect_timeout": 5} if "postgresql" in raw_db_url else {}
+
 # Create SQLAlchemy engine with pool_pre_ping for connection health verification
 engine = create_engine(
-    settings.DATABASE_URL,
+    raw_db_url,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    connect_args=connect_args,
 )
 
 # Thread-local sessionmaker

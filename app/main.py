@@ -5,10 +5,11 @@ auto-seeds initial administrative users, and registers domain controllers.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, status, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -35,33 +36,41 @@ async def lifespan(app: FastAPI):
     2. Automatically seeds default SYSTEM_ADMIN and ADMIN accounts if they do not exist.
     """
     logger.info("Initializing application startup sequence...")
-    try:
-        # Create database tables strictly using SQLAlchemy ORM metadata
-        logger.info("Creating database tables using SQLAlchemy Base.metadata.create_all()...")
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables verified/created successfully.")
-
-        # Ensure report_id column exists if table was previously created
-        try:
-            from sqlalchemy import text
-            with engine.connect() as conn:
-                conn.execute(text("ALTER TABLE suspect_reports ADD COLUMN IF NOT EXISTS report_id VARCHAR(50);"))
-                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_suspect_reports_report_id ON suspect_reports (report_id);"))
-                conn.commit()
-        except Exception as mig_exc:
-            logger.debug("Migration check completed: %s", mig_exc)
-
-        # Automatically seed initial SYSTEM_ADMIN and ADMIN accounts
-        logger.info("Checking and seeding default administrative accounts...")
-        with SessionLocal() as db:
-            UserService.seed_initial_users(db)
-
-    except Exception as exc:
-        logger.error(
-            "Database startup initialization error: %s. "
-            "Please ensure PostgreSQL is running and DATABASE_URL is correctly configured.",
-            exc,
+    is_localhost_db = "localhost" in settings.DATABASE_URL or "127.0.0.1" in settings.DATABASE_URL
+    if os.getenv("VERCEL") and is_localhost_db:
+        logger.warning(
+            "DATABASE_URL is set to localhost on Vercel! "
+            "Please configure your cloud PostgreSQL database (e.g. Neon, Supabase) in Vercel Environment Variables. "
+            "Skipping startup table initialization to avoid serverless function timeouts."
         )
+    else:
+        try:
+            # Create database tables strictly using SQLAlchemy ORM metadata
+            logger.info("Creating database tables using SQLAlchemy Base.metadata.create_all()...")
+            Base.metadata.create_all(bind=engine)
+            logger.info("Database tables verified/created successfully.")
+
+            # Ensure report_id column exists if table was previously created
+            try:
+                from sqlalchemy import text
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE suspect_reports ADD COLUMN IF NOT EXISTS report_id VARCHAR(50);"))
+                    conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_suspect_reports_report_id ON suspect_reports (report_id);"))
+                    conn.commit()
+            except Exception as mig_exc:
+                logger.debug("Migration check completed: %s", mig_exc)
+
+            # Automatically seed initial SYSTEM_ADMIN and ADMIN accounts
+            logger.info("Checking and seeding default administrative accounts...")
+            with SessionLocal() as db:
+                UserService.seed_initial_users(db)
+
+        except Exception as exc:
+            logger.error(
+                "Database startup initialization error: %s. "
+                "Please ensure PostgreSQL is running and DATABASE_URL is correctly configured.",
+                exc,
+            )
     yield
     logger.info("Application shutdown completed.")
 
@@ -100,8 +109,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount all domain controllers via central API router
+# Mount all domain controllers via central API router (with and without /api prefix)
 app.include_router(api_router)
+app.include_router(api_router, prefix="/api")
 
 
 @app.exception_handler(Exception)
@@ -118,6 +128,18 @@ async def global_exception_handler(request: Request, exc: Exception):
     "/",
     tags=["Root & Health"],
     summary="API Root & Status",
+    response_class=JSONResponse,
+)
+@app.get(
+    "/api",
+    tags=["Root & Health"],
+    include_in_schema=False,
+    response_class=JSONResponse,
+)
+@app.get(
+    "/api/data",
+    tags=["Root & Health"],
+    include_in_schema=False,
     response_class=JSONResponse,
 )
 def root():
@@ -137,6 +159,12 @@ def root():
     summary="Detailed Health Check",
     status_code=status.HTTP_200_OK,
 )
+@app.get(
+    "/api/health",
+    tags=["Root & Health"],
+    include_in_schema=False,
+    status_code=status.HTTP_200_OK,
+)
 def health_check():
     """Database connectivity health check."""
     db_status = "connected"
@@ -153,10 +181,23 @@ def health_check():
     }
 
 
+@app.get("/api/docs", include_in_schema=False)
+def redirect_api_docs():
+    """Redirect /api/docs to Swagger UI."""
+    return RedirectResponse(url="/docs")
+
+
 @app.post(
     "/reports",
     tags=["Reports"],
     summary="Submit report alias (Public)",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SuspectReportResponse,
+)
+@app.post(
+    "/api/reports",
+    tags=["Reports"],
+    include_in_schema=False,
     status_code=status.HTTP_201_CREATED,
     response_model=SuspectReportResponse,
 )
