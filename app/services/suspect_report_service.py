@@ -206,7 +206,22 @@ class SuspectReportService:
                         report.id,
                         upload_err,
                     )
-                    # Continue uploading other files if one fails, or re-raise if critical
+                    # If S3 upload encounters any issue, still record evidence file metadata in PostgreSQL
+                    try:
+                        content_bytes = await file.read()
+                        file_size = len(content_bytes) if content_bytes else 0
+                    except Exception:
+                        file_size = 0
+
+                    evidence_file = SuspectReportFile(
+                        report_id=report.id,
+                        file_url=f"pending_s3://suspect_reports/{file.filename}",
+                        filename=f"pending_{file.filename}",
+                        original_filename=file.filename,
+                        content_type=file.content_type or "application/octet-stream",
+                        size_bytes=file_size,
+                    )
+                    db.add(evidence_file)
                     continue
 
             db.commit()

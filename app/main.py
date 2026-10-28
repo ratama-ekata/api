@@ -187,8 +187,9 @@ def health_check():
     """Database connectivity health check."""
     db_status = "connected"
     try:
+        from app.models.user import User
         with engine.connect() as connection:
-            connection.execute(app.models.User.__table__.select().limit(1))
+            connection.execute(User.__table__.select().limit(1))
     except Exception as e:
         db_status = f"error: {str(e)}"
 
@@ -196,6 +197,9 @@ def health_check():
         "status": "online",
         "database": db_status,
         "service": "api.ratamaekata.gov.lk",
+        "aws_configured": bool(settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY),
+        "aws_bucket": settings.AWS_S3_BUCKET_NAME,
+        "aws_region": settings.AWS_REGION,
     }
 
 
