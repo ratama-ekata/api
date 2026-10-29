@@ -127,9 +127,10 @@ async def vercel_path_rewrite_middleware(request: Request, call_next):
             break
     return await call_next(request)
 
-# Mount all domain controllers via central API router (with and without /api prefix)
+# Mount all domain controllers via central API router
 app.include_router(api_router)
-app.include_router(api_router, prefix="/api")
+# Backward-compatible alias for /api prefix, excluded from OpenAPI docs to prevent duplicates
+app.include_router(api_router, prefix="/api", include_in_schema=False)
 
 
 @app.exception_handler(Exception)
